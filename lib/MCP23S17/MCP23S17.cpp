@@ -1,0 +1,86 @@
+#include "MCP23S17.h"
+
+MCP23S17::MCP23S17(uint8_t csPin, SPIClass& bus, SPISettings settings, uint8_t hwAddr)
+    : _cs(csPin), _spi(bus), _settings(settings)
+{
+    _opWrite = OPCODE_BASE | ((hwAddr & 0x07) << 1);
+    _opRead  = _opWrite | 0x01;
+}
+
+void MCP23S17::begin() {
+    pinMode(_cs, OUTPUT);
+    digitalWrite(_cs, HIGH);
+
+    // Enable hardware address pins (HAEN) so multiple devices can share bus
+    writeReg(REG_IOCON, 0x08);
+
+    // All pins as outputs (0 = output)
+    writeReg(REG_IODIRA, 0x00);
+    writeReg(REG_IODIRB, 0x00);
+
+    // All outputs off at startup
+    _state = 0;
+    flushState();
+}
+
+bool MCP23S17::setChannel(uint8_t channel, bool state) {
+    if (channel < 1 || channel > 16) return false;
+
+    uint16_t bit = channelBit(channel);
+    if (state)
+        _state |= bit;
+    else
+        _state &= ~bit;
+
+    flushState();
+    return true;
+}
+
+void MCP23S17::setAll(uint16_t mask) {
+    _state = mask;
+    flushState();
+}
+
+void MCP23S17::allOff() {
+    _state = 0;
+    flushState();
+}
+
+// --- private ---
+
+uint16_t MCP23S17::channelBit(uint8_t ch) {
+    // Channels 1-8 → PORTB bits 7..0 (ch1=bit15 of _state, ch8=bit8)
+    // Channels 9-16 → PORTA bits 7..0 (ch9=bit7 of _state, ch16=bit0)
+    if (ch <= 8)
+        return 1u << (16 - ch);  // PORTB: ch1→bit15, ch8→bit8
+    else
+        return 1u << (16 - ch);  // PORTA: ch9→bit7, ch16→bit0
+}
+
+void MCP23S17::flushState() {
+    uint8_t portB = (_state >> 8) & 0xFF;  // actuators 1-8
+    uint8_t portA = _state & 0xFF;          // actuators 9-16
+    writeReg(REG_OLATB, portB);
+    writeReg(REG_OLATA, portA);
+}
+
+void MCP23S17::writeReg(uint8_t addr, uint8_t data) {
+    _spi.beginTransaction(_settings);
+    digitalWrite(_cs, LOW);
+    _spi.transfer(_opWrite);
+    _spi.transfer(addr);
+    _spi.transfer(data);
+    digitalWrite(_cs, HIGH);
+    _spi.endTransaction();
+}
+
+uint8_t MCP23S17::readReg(uint8_t addr) {
+    _spi.beginTransaction(_settings);
+    digitalWrite(_cs, LOW);
+    _spi.transfer(_opRead);
+    _spi.transfer(addr);
+    uint8_t val = _spi.transfer(0);
+    digitalWrite(_cs, HIGH);
+    _spi.endTransaction();
+    return val;
+}

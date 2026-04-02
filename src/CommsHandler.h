@@ -1,0 +1,39 @@
+#pragma once
+#include <Arduino.h>
+#include "BoardConfig.h"
+
+// RS-485 half-duplex communication handler with DE pin control.
+// Receives line-delimited packets, transmits with automatic DE assertion.
+// Adds XOR checksum to outgoing telemetry for noise resilience.
+
+class CommsHandler {
+public:
+    CommsHandler(HardwareSerial& port, uint8_t dePin, size_t rxBufSize = RS485_RX_BUF);
+
+    void begin(uint32_t baud = RS485_BAUD);
+    void poll();
+
+    bool isPacketReady() const { return _ready; }
+    char* takePacket();
+
+    // TX helpers — assert DE, write, deassert DE
+    void send(const char* msg);
+    void sendLine(const char* msg);
+
+    // Format a float array as a CSV telemetry row: "<id><val>,<val>,...\n"
+    static size_t toCSVRow(const float* data, char id, uint8_t count,
+                           char* buf, size_t bufLen, uint8_t decimals = DATA_DECIMALS);
+
+private:
+    HardwareSerial& _port;
+    uint8_t _dePin;
+    char _rxBuf[RS485_RX_BUF];
+    uint8_t _serialRxMem[RS485_RX_BUF];
+    uint8_t _serialTxMem[RS485_TX_BUF];
+    size_t _rxPos = 0;
+    bool _ready = false;
+    elapsedMillis _idleTimer;
+
+    void deAssert();
+    void deRelease();
+};
