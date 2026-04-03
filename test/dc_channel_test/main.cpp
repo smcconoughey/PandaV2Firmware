@@ -1,11 +1,12 @@
 // DC Channel Hardware Test — PandaV2
-// Menu-driven serial console for validating ADC + mux signal chain.
+// Menu-driven serial console for validating ADC + mux + actuation chain.
 
 #include <Arduino.h>
 #include <SPI.h>
 #include "pins.h"
 #include "BoardConfig.h"
 #include <MCP3561RT.h>
+#include <MCP23S17.h>
 
 // ── Configuration ───────────────────────────────────────────────────
 
@@ -15,11 +16,13 @@ static constexpr uint8_t MUX_C_PINS[4] = {PIN_MUX_C_S0, PIN_MUX_C_S1, PIN_MUX_C_
 
 static constexpr uint32_t CONV_TIMEOUT_US = 50000;
 static constexpr uint16_t DEFAULT_NOISE_SAMPLES = 200;
+static constexpr uint32_t DEFAULT_PULSE_MS = 500;
 
 // ── Hardware instances ──────────────────────────────────────────────
 
 MCP3561RT adc1(PIN_ADC1_CS, PIN_ADC1_IRQ, SPI,  SPI_ADC_SETTINGS, 1.25f);
 MCP3561RT adc2(PIN_ADC2_CS, PIN_ADC2_IRQ, SPI1, SPI_ADC_SETTINGS, 1.25f);
+MCP23S17  ioexp(PIN_IOEXP_CS, SPI1, SPI_IOEXP_SETTINGS);
 
 // ── Mux helpers ─────────────────────────────────────────────────────
 
@@ -205,6 +208,74 @@ static void testNoise() {
     Serial.println();
 }
 
+// ── Actuation test functions ────────────────────────────────────────
+
+static void testActuateSingle() {
+    Serial.println("=== Single Actuator Toggle ===");
+    Serial.printf("Channel (1-%u): ", NUM_ACTUATORS);
+    int ch = readSerialInt();
+    if (ch < 1 || ch > 16) { Serial.println("Invalid channel."); return; }
+
+    Serial.printf("Pulse duration ms (%lu default): ", DEFAULT_PULSE_MS);
+    int dur = readSerialInt();
+    if (dur <= 0) dur = DEFAULT_PULSE_MS;
+
+    Serial.printf("Actuating CH%02d for %d ms...", ch, dur);
+    ioexp.setChannel((uint8_t)ch, true);
+    delay(dur);
+    ioexp.setChannel((uint8_t)ch, false);
+    Serial.println(" done.");
+    Serial.println();
+}
+
+static void testActuateWalk() {
+    Serial.println("=== Walk All Actuators ===");
+    Serial.printf("Pulse duration ms per channel (%lu default): ", DEFAULT_PULSE_MS);
+    int dur = readSerialInt();
+    if (dur <= 0) dur = DEFAULT_PULSE_MS;
+
+    for (uint8_t ch = 1; ch <= NUM_ACTUATORS; ch++) {
+        Serial.printf("  CH%02d ON...", ch);
+        ioexp.setChannel(ch, true);
+        delay(dur);
+        ioexp.setChannel(ch, false);
+        Serial.println(" OFF");
+        delay(50);  // brief gap between channels
+    }
+    Serial.println("Walk complete.");
+    Serial.println();
+}
+
+static void testActuateAllOnOff() {
+    Serial.println("=== All Actuators On/Off ===");
+    Serial.printf("Pulse duration ms (%lu default): ", DEFAULT_PULSE_MS);
+    int dur = readSerialInt();
+    if (dur <= 0) dur = DEFAULT_PULSE_MS;
+
+    Serial.printf("All ON for %d ms...", dur);
+    ioexp.setAll(0xFFFF);
+    delay(dur);
+    ioexp.allOff();
+    Serial.println(" All OFF.");
+    Serial.println();
+}
+
+static void testActuation() {
+    Serial.println("=== Actuation Test ===");
+    Serial.println("  1  Toggle single channel");
+    Serial.println("  2  Walk all channels");
+    Serial.println("  3  All on / all off");
+    Serial.print("> ");
+
+    int sub = readSerialInt();
+    switch (sub) {
+        case 1: testActuateSingle();   break;
+        case 2: testActuateWalk();     break;
+        case 3: testActuateAllOnOff(); break;
+        default: Serial.println("Invalid option."); break;
+    }
+}
+
 // ── Menu ────────────────────────────────────────────────────────────
 
 static void printMenu() {
@@ -215,6 +286,7 @@ static void printMenu() {
     Serial.println("  2  Single channel read");
     Serial.println("  3  16-channel sweep");
     Serial.println("  4  Noise statistics");
+    Serial.println("  5  Actuation test");
     Serial.println("──────────────────────────────────");
     Serial.print("> ");
 }
@@ -235,10 +307,12 @@ void setup() {
 
     bool adc1_ok = adc1.begin();
     bool adc2_ok = adc2.begin();
+    ioexp.begin();
 
     Serial.println("\nPandaV2 DC Channel Test");
-    Serial.printf("ADC1: %s\n", adc1_ok ? "OK" : "FAIL");
-    Serial.printf("ADC2: %s\n", adc2_ok ? "OK" : "FAIL");
+    Serial.printf("ADC1:  %s\n", adc1_ok ? "OK" : "FAIL");
+    Serial.printf("ADC2:  %s\n", adc2_ok ? "OK" : "FAIL");
+    Serial.println("IOEXP: OK");
 
     printMenu();
 }
@@ -253,6 +327,7 @@ void loop() {
         case 2: testSingleChannel(); break;
         case 3: testSweep();         break;
         case 4: testNoise();         break;
+        case 5: testActuation();     break;
         default: break;
     }
 
