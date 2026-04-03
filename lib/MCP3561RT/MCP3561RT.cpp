@@ -23,6 +23,11 @@ bool MCP3561RT::begin() {
     // CONFIG3: one-shot mode, 24-bit data
     writeReg(REG_CONFIG3, 0b10000000);
 
+    // IRQ register: disable STATUS byte prefix on reads (EN_STP=0),
+    // keep fast commands enabled (EN_FASTCMD=1), open-drain IRQ output.
+    // Upper nibble is read-only status bits (writes ignored).
+    writeReg(REG_IRQ, 0b00000010);
+
     // MUX: CH0 vs AGND
     setMux(Mux::CH0, Mux::AGND);
 
@@ -57,9 +62,9 @@ bool MCP3561RT::dataReady() const {
 }
 
 bool MCP3561RT::readRaw(int32_t& out) {
-    // Check data-ready via IRQ register as well
-    uint8_t irqReg = readReg(REG_IRQ);
-    if (irqReg & 0x40) return false; // bit 6 = ~DR, high means not ready
+    // Caller must confirm data-ready (via IRQ pin) before calling.
+    // No redundant IRQ register read — that extra SPI transaction was
+    // interfering with the data-ready state on subsequent conversions.
 
     _spi.beginTransaction(_settings);
     digitalWrite(_cs, LOW);

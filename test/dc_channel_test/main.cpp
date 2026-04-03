@@ -226,6 +226,7 @@ void setup() {
     while (!Serial && millis() < 3000) {}
 
     SPI.begin();
+    SPI1.setMISO(PIN_SPI1_MISO);  // default is pin 1; hardware uses pin 39
     SPI1.begin();
 
     initMuxPins(MUX_A_PINS);
