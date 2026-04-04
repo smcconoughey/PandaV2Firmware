@@ -10,6 +10,7 @@
 #include <INA230.h>
 
 #include "Scanner.h"
+#include "SensorConfig.h"
 #include "CommsHandler.h"
 #include "SequenceHandler.h"
 #include "ArmingController.h"
@@ -43,18 +44,25 @@ float muxA_data[NUM_MUX_A_CH] = {0};
 float muxB_data[NUM_MUX_B_CH] = {0};
 float muxC_data[NUM_MUX_C_CH] = {0};
 
-// Mux banks for ADC1 (mux A = voltage channels, mux B = current sense)
+// Converted sensor output buffers
+float ptData[NUM_PT_CH]   = {0};   // PTs (converted from muxA)
+float lcData[NUM_LC_CH]   = {0};   // load cells (converted from muxC 0..7)
+float tcData[NUM_TC_CH]   = {0};   // thermocouples (converted from muxC 8..15)
+float curData[NUM_MUX_B_CH] = {0}; // solenoid current (converted from muxB)
+float boardTemp = 25.0f;           // CJC reference from ADC internal sensor
+
+// Mux banks for ADC1 (mux A = PTs, mux B = current sense)
 MuxBank adc1Banks[] = {
     {{PIN_MUX_A_S0, PIN_MUX_A_S1, PIN_MUX_A_S2, PIN_MUX_A_S3},
-     NUM_MUX_A_CH, MCP3561RT::Mux::CH0, muxA_data},
+     NUM_MUX_A_CH, MCP3561RT::Mux::CH0, muxA_data, 1.25f},
     {{PIN_MUX_B_S0, PIN_MUX_B_S1, PIN_MUX_B_S2, PIN_MUX_B_S3},
-     NUM_MUX_B_CH, MCP3561RT::Mux::CH1, muxB_data},
+     NUM_MUX_B_CH, MCP3561RT::Mux::CH1, muxB_data, 3.3f},
 };
 
-// Mux bank for ADC2 (mux C)
+// Mux bank for ADC2 (mux C = LCs + TCs)
 MuxBank adc2Banks[] = {
     {{PIN_MUX_C_S0, PIN_MUX_C_S1, PIN_MUX_C_S2, PIN_MUX_C_S3},
-     NUM_MUX_C_CH, MCP3561RT::Mux::CH0, muxC_data},
+     NUM_MUX_C_CH, MCP3561RT::Mux::CH0, muxC_data, 1.25f},
 };
 
 Scanner scanner1(adc1, adc1Banks, 2);
@@ -170,6 +178,36 @@ static void handleCommand(char* packet) {
     }
 }
 
+// ── Sensor conversion ───────────────────────────────────────────────
+
+static elapsedMillis boardTempTimer;
+static constexpr uint32_t BOARD_TEMP_INTERVAL_MS = 2000;
+
+static void updateConversions() {
+    // Update board temp periodically (blocking read, ~1ms)
+    if (boardTempTimer >= BOARD_TEMP_INTERVAL_MS) {
+        boardTempTimer = 0;
+        float t = scanner2.readBoardTemp();
+        if (t > -900.0f) boardTemp = t;
+    }
+
+    // PTs: mux A raw voltage → engineering units
+    for (uint8_t i = 0; i < NUM_PT_CH; i++)
+        ptData[i] = convertPT(muxA_data[i], i);
+
+    // Current sense: mux B raw voltage → amps
+    for (uint8_t i = 0; i < NUM_MUX_B_CH; i++)
+        curData[i] = convertCurrent(muxB_data[i]);
+
+    // Load cells: mux C channels 0..7
+    for (uint8_t i = 0; i < NUM_LC_CH; i++)
+        lcData[i] = convertLC(muxC_data[MUX_C_LC_START + i], i);
+
+    // Thermocouples: mux C channels 8..15
+    for (uint8_t i = 0; i < NUM_TC_CH; i++)
+        tcData[i] = convertTC(muxC_data[MUX_C_TC_START + i], i, boardTemp);
+}
+
 // ── Telemetry output ────────────────────────────────────────────────
 
 static elapsedMillis telemetryTimer;
@@ -181,16 +219,19 @@ static void sendTelemetry() {
 
     char buf[512];
 
-    // Mux A data (voltage/differential channels — maps to V1's PT data)
-    CommsHandler::toCSVRow(muxA_data, 'p', NUM_MUX_A_CH, buf, sizeof(buf));
+    // PTs (converted)
+    CommsHandler::toCSVRow(ptData, 'p', NUM_PT_CH, buf, sizeof(buf));
     comms.send(buf);
 
-    // Mux B data (current sense — maps to V1's solenoid current)
-    CommsHandler::toCSVRow(muxB_data, ID_SOLENOID_CURRENT, NUM_MUX_B_CH, buf, sizeof(buf));
+    // Solenoid current (converted)
+    CommsHandler::toCSVRow(curData, ID_SOLENOID_CURRENT, NUM_MUX_B_CH, buf, sizeof(buf));
     comms.send(buf);
 
-    // Mux C data (ADC2 channels)
-    CommsHandler::toCSVRow(muxC_data, ID_LCTC, NUM_MUX_C_CH, buf, sizeof(buf));
+    // LCs + TCs combined (matches V1's 't' packet format)
+    float lctcCombined[NUM_LC_CH + NUM_TC_CH];
+    memcpy(lctcCombined, lcData, sizeof(float) * NUM_LC_CH);
+    memcpy(lctcCombined + NUM_LC_CH, tcData, sizeof(float) * NUM_TC_CH);
+    CommsHandler::toCSVRow(lctcCombined, ID_LCTC, NUM_LC_CH + NUM_TC_CH, buf, sizeof(buf));
     comms.send(buf);
 }
 
@@ -293,10 +334,13 @@ void loop() {
     scanner1.update();
     scanner2.update();
 
-    // 4. Telemetry
+    // 4. Sensor conversions (raw voltage → engineering units)
+    updateConversions();
+
+    // 5. Telemetry
     sendTelemetry();
     sendPowerTelemetry();
 
-    // 5. Sequence completion detection
+    // 6. Sequence completion detection
     checkSequenceComplete();
 }

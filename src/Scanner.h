@@ -13,6 +13,7 @@ struct MuxBank {
     uint8_t numChannels;
     MCP3561RT::Mux adcInput;    // which ADC input the mux feeds
     float* out;                 // output buffer (caller-owned)
+    float vref;                 // reference voltage for this bank's conversion
 };
 
 class Scanner {
@@ -24,6 +25,10 @@ public:
 
     bool scanComplete() const { return _scanComplete; }
     void clearScanComplete() { _scanComplete = false; }
+
+    // Read ADC internal temperature sensor (for TC cold junction compensation).
+    // Blocking — only call during setup or when you can afford ~1ms.
+    float readBoardTemp();
 
 private:
     enum State : uint8_t { IDLE, WAIT_MUX, WAIT_CONV };

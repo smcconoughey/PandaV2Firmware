@@ -39,8 +39,7 @@ void Scanner::update() {
         if (_adc.dataReady()) {
             int32_t raw;
             if (_adc.readRaw(raw)) {
-                float vref = 1.25f; // internal ref; override per-bank if needed
-                bank.out[_chanIdx] = vref * (float(raw) / 8388608.0f);
+                bank.out[_chanIdx] = bank.vref * (float(raw) / 8388608.0f);
             }
             advanceChannel();
             _state = IDLE;
@@ -53,6 +52,27 @@ void Scanner::selectMuxChannel(const MuxBank& bank, uint8_t ch) {
     for (uint8_t i = 0; i < 4; i++) {
         digitalWrite(bank.pins[i], (ch >> i) & 1);
     }
+}
+
+float Scanner::readBoardTemp() {
+    // MCP3561RT internal temp sensor: set mux to TEMP_P vs TEMP_N,
+    // do a blocking one-shot, convert using datasheet formula.
+    // T(°C) = (V_temp - 0.492) / 0.00176 approximately.
+    // This is a rough estimate — datasheet says ~±2°C typical.
+    _adc.setMux(MCP3561RT::Mux::TEMP_P, MCP3561RT::Mux::TEMP_N);
+    delayMicroseconds(T_MUX_SETTLE_US);
+    _adc.trigger();
+
+    elapsedMicros timeout;
+    while (!_adc.dataReady()) {
+        if (timeout > 50000) return -999.0f;
+    }
+
+    int32_t raw;
+    if (!_adc.readRaw(raw)) return -999.0f;
+
+    float voltage = 1.25f * (float(raw) / 8388608.0f);
+    return (voltage - 0.492f) / 0.00176f;
 }
 
 void Scanner::advanceChannel() {
