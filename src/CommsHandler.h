@@ -8,7 +8,7 @@
 
 class CommsHandler {
 public:
-    CommsHandler(HardwareSerial& port, uint8_t dePin, size_t rxBufSize = RS485_RX_BUF);
+    CommsHandler(HardwareSerialIMXRT& port, uint8_t dePin, size_t rxBufSize = RS485_RX_BUF);
 
     void begin(uint32_t baud = RS485_BAUD);
     void poll();
@@ -25,7 +25,7 @@ public:
                            char* buf, size_t bufLen, uint8_t decimals = DATA_DECIMALS);
 
 private:
-    HardwareSerial& _port;
+    HardwareSerialIMXRT& _port;
     uint8_t _dePin;
     char _rxBuf[RS485_RX_BUF];
     uint8_t _serialRxMem[RS485_RX_BUF];

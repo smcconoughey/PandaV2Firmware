@@ -1,7 +1,7 @@
 #include "CommsHandler.h"
 #include <cstdio>
 
-CommsHandler::CommsHandler(HardwareSerial& port, uint8_t dePin, size_t rxBufSize)
+CommsHandler::CommsHandler(HardwareSerialIMXRT& port, uint8_t dePin, size_t rxBufSize)
     : _port(port), _dePin(dePin)
 {
     (void)rxBufSize;
