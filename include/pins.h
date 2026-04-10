@@ -45,10 +45,10 @@
 // so it's point-to-point only (no multi-drop bus sharing).
 // DI connects to Teensy TX; RO connects to Teensy RX.
 // ---------------------------------------------------------------------------
-#define PIN_RS485_1_RX  0   // Serial1 RX
-#define PIN_RS485_1_TX  1   // Serial1 TX
-#define PIN_RS485_2_RX  7   // Serial2 RX
-#define PIN_RS485_2_TX  8   // Serial2 TX
+#define PIN_RS485_1_RX  28   // Serial7 RX
+#define PIN_RS485_1_TX  29   // Serial7 TX
+#define PIN_RS485_2_RX  25   // Serial6 RX
+#define PIN_RS485_2_TX  24   // Serial6 TX
 
 // DE is tied to +3V3 on both transceivers (driver always enabled).
 // No GPIO control needed — the bus is always driven.
