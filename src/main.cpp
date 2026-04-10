@@ -25,8 +25,10 @@ INA230 pmon0(Wire, INA230_ADDR_U8);
 INA230 pmon1(Wire, INA230_ADDR_U10);
 INA230 pmon2(Wire, INA230_ADDR_U12);
 
-// RS-485 comms (Serial1 = bus 1, Serial2 = bus 2)
-CommsHandler comms(Serial1, PIN_RS485_1_DE);
+// RS-485 comms (Serial7 = bus 1, Serial8 = bus 2)
+CommsHandler comms(Serial7, PIN_RS485_1_DE);
+CommsHandler comms2(Serial6, PIN_RS485_2_DE);
+
 
 // Arming — pin assignments are placeholders, verify on V2 hardware
 ArmingController arming(PIN_ARM, PIN_DISARM);

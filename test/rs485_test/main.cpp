@@ -31,11 +31,11 @@ static void flushRx(HardwareSerial& port) {
 // ── Test helpers ─────────────────────────────────────────────────────
 
 static const char* portName(uint8_t p) {
-    return (p == 1) ? "RS485_1 (Serial1)" : "RS485_2 (Serial2)";
+    return (p == 1) ? "RS485_1 (Serial7)" : "RS485_2 (Serial8)";
 }
 
 static HardwareSerial& getPort(uint8_t p) {
-    return (p == 1) ? Serial1 : Serial2;
+    return (p == 1) ? Serial7 : Serial8;
 }
 
 // Send a byte pattern and wait to receive it back on the other port.
@@ -78,16 +78,16 @@ static void testLoopback() {
     uint16_t pass12 = 0, fail12 = 0;
     uint16_t pass21 = 0, fail21 = 0;
 
-    Serial.println("  Serial1 → Serial2:");
+    Serial.println("  Serial7 → Serial6:");
     for (uint16_t v = 0; v < 256; v++) {
-        if (loopbackByte(Serial1, Serial2, (uint8_t)v)) pass12++;
+        if (loopbackByte(Serial7, Serial6, (uint8_t)v)) pass12++;
         else                                              fail12++;
     }
     Serial.printf("    Pass: %u / 256  Fail: %u\n", pass12, fail12);
 
-    Serial.println("  Serial2 → Serial1:");
+    Serial.println("  Serial6 → Serial7:");
     for (uint16_t v = 0; v < 256; v++) {
-        if (loopbackByte(Serial2, Serial1, (uint8_t)v)) pass21++;
+        if (loopbackByte(Serial6, Serial7, (uint8_t)v)) pass21++;
         else                                              fail21++;
     }
     Serial.printf("    Pass: %u / 256  Fail: %u\n", pass21, fail21);
@@ -108,11 +108,11 @@ static void testBurstThroughput() {
     uint8_t payload[BURST_BYTES];
     for (uint16_t i = 0; i < BURST_BYTES; i++) payload[i] = (uint8_t)i;
 
-    // TX from Serial1, RX on Serial2
-    flushRx(Serial2);
+    // TX from Serial7, RX on Serial6
+    flushRx(Serial6);
     uint32_t t0 = micros();
-    Serial1.write(payload, BURST_BYTES);
-    Serial1.flush();
+    Serial7.write(payload, BURST_BYTES);
+    Serial7.flush();
     uint32_t txUs = micros() - t0;
 
     // Collect reply
@@ -121,8 +121,8 @@ static void testBurstThroughput() {
     uint16_t rxCount = 0;
 
     while (rxCount < BURST_BYTES && millis() < deadline) {
-        while (Serial2.available() && rxCount < BURST_BYTES) {
-            rxBuf[rxCount++] = Serial2.read();
+        while (Serial6.available() && rxCount < BURST_BYTES) {
+            rxBuf[rxCount++] = Serial6.read();
         }
     }
 
@@ -150,7 +150,7 @@ static void testStress() {
     uint16_t pass = 0, fail = 0;
     for (uint16_t i = 0; i < STRESS_ITERATIONS; i++) {
         uint8_t val = (uint8_t)(random(256));
-        if (loopbackByte(Serial1, Serial2, val)) pass++;
+        if (loopbackByte(Serial7, Serial6, val)) pass++;
         else                                      fail++;
     }
 
