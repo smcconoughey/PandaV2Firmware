@@ -6,7 +6,6 @@
 #include "BoardConfig.h"
 
 #include <MCP3561RT.h>
-#include <MCP23S17.h>
 #include <INA230.h>
 
 #include "Scanner.h"
@@ -21,9 +20,6 @@
 MCP3561RT adc1(PIN_ADC1_CS, PIN_ADC1_IRQ, SPI, SPI_ADC_SETTINGS, 1.25f);
 MCP3561RT adc2(PIN_ADC2_CS, PIN_ADC2_IRQ, SPI1, SPI_ADC_SETTINGS, 1.25f);
 
-// I/O expander (16 actuator outputs, SPI1)
-MCP23S17 ioexp(PIN_IOEXP_CS, SPI1, SPI_IOEXP_SETTINGS, 0);
-
 // Power monitors (I2C)
 INA230 pmon0(Wire, INA230_ADDR_U8);
 INA230 pmon1(Wire, INA230_ADDR_U10);
@@ -35,8 +31,8 @@ CommsHandler comms(Serial1, PIN_RS485_1_DE);
 // Arming — pin assignments are placeholders, verify on V2 hardware
 ArmingController arming(PIN_ARM, PIN_DISARM);
 
-// Sequence handler (drives actuators through I/O expander)
-SequenceHandler seq(ioexp);
+// Sequence handler (drives solenoids via DC_PINS GPIO)
+SequenceHandler seq;
 
 // ── Scanner output buffers ──────────────────────────────────────────
 
@@ -290,9 +286,8 @@ void setup() {
     bool adc1_ok = adc1.begin();
     bool adc2_ok = adc2.begin();
 
-    // I/O expander — all outputs off
-    ioexp.begin();
-    ioexp.allOff();
+    // DC solenoid outputs — configure pins and ensure all off
+    seq.begin();
 
     // Scanners
     scanner1.begin();

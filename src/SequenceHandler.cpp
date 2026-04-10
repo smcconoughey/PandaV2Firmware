@@ -2,9 +2,13 @@
 #include <cstring>
 #include <cstdio>
 
-SequenceHandler::SequenceHandler(MCP23S17& ioexp)
-    : _io(ioexp)
-{
+SequenceHandler::SequenceHandler() {}
+
+void SequenceHandler::begin() {
+    for (uint8_t i = 0; i < NUM_ACTUATORS; i++) {
+        pinMode(DC_PINS[i], OUTPUT);
+        digitalWrite(DC_PINS[i], LOW);
+    }
 }
 
 bool SequenceHandler::setCommand(const char* command) {
@@ -81,7 +85,7 @@ void SequenceHandler::update() {
 
     if (!_inDelay) {
         SequenceStep& step = _steps[_currentStep];
-        _io.setChannel(step.channel, step.state);
+        digitalWrite(DC_PINS[step.channel - 1], step.state ? HIGH : LOW);
         _stepTimer = 0;
         _inDelay = true;
     }
@@ -103,9 +107,12 @@ void SequenceHandler::cancelExecution() {
 }
 
 void SequenceHandler::setAllOff() {
-    _io.allOff();
+    for (uint8_t i = 0; i < NUM_ACTUATORS; i++)
+        digitalWrite(DC_PINS[i], LOW);
 }
 
 bool SequenceHandler::setChannel(uint8_t channel, bool state) {
-    return _io.setChannel(channel, state);
+    if (channel < 1 || channel > NUM_ACTUATORS) return false;
+    digitalWrite(DC_PINS[channel - 1], state ? HIGH : LOW);
+    return true;
 }

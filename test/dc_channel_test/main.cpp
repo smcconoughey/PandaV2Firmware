@@ -6,7 +6,6 @@
 #include "pins.h"
 #include "BoardConfig.h"
 #include <MCP3561RT.h>
-#include <MCP23S17.h>
 
 // ── Configuration ───────────────────────────────────────────────────
 
@@ -22,7 +21,6 @@ static constexpr uint32_t DEFAULT_PULSE_MS = 500;
 
 MCP3561RT adc1(PIN_ADC1_CS, PIN_ADC1_IRQ, SPI,  SPI_ADC_SETTINGS, 1.25f);
 MCP3561RT adc2(PIN_ADC2_CS, PIN_ADC2_IRQ, SPI1, SPI_ADC_SETTINGS, 1.25f);
-MCP23S17  ioexp(PIN_IOEXP_CS, SPI1, SPI_IOEXP_SETTINGS);
 
 // ── Mux helpers ─────────────────────────────────────────────────────
 
@@ -208,22 +206,34 @@ static void testNoise() {
     Serial.println();
 }
 
+// ── Actuation helpers ───────────────────────────────────────────────
+
+static void dcSetChannel(uint8_t ch, bool state) {
+    // ch is 1-indexed
+    digitalWrite(DC_PINS[ch - 1], state ? HIGH : LOW);
+}
+
+static void dcAllOff() {
+    for (uint8_t i = 0; i < NUM_ACTUATORS; i++)
+        digitalWrite(DC_PINS[i], LOW);
+}
+
 // ── Actuation test functions ────────────────────────────────────────
 
 static void testActuateSingle() {
     Serial.println("=== Single Actuator Toggle ===");
     Serial.printf("Channel (1-%u): ", NUM_ACTUATORS);
     int ch = readSerialInt();
-    if (ch < 1 || ch > 16) { Serial.println("Invalid channel."); return; }
+    if (ch < 1 || ch > (int)NUM_ACTUATORS) { Serial.println("Invalid channel."); return; }
 
     Serial.printf("Pulse duration ms (%lu default): ", DEFAULT_PULSE_MS);
     int dur = readSerialInt();
     if (dur <= 0) dur = DEFAULT_PULSE_MS;
 
     Serial.printf("Actuating CH%02d for %d ms...", ch, dur);
-    ioexp.setChannel((uint8_t)ch, true);
+    dcSetChannel((uint8_t)ch, true);
     delay(dur);
-    ioexp.setChannel((uint8_t)ch, false);
+    dcSetChannel((uint8_t)ch, false);
     Serial.println(" done.");
     Serial.println();
 }
@@ -235,12 +245,12 @@ static void testActuateWalk() {
     if (dur <= 0) dur = DEFAULT_PULSE_MS;
 
     for (uint8_t ch = 1; ch <= NUM_ACTUATORS; ch++) {
-        Serial.printf("  CH%02d ON...", ch);
-        ioexp.setChannel(ch, true);
+        Serial.printf("  CH%02d (pin %u) ON...", ch, DC_PINS[ch - 1]);
+        dcSetChannel(ch, true);
         delay(dur);
-        ioexp.setChannel(ch, false);
+        dcSetChannel(ch, false);
         Serial.println(" OFF");
-        delay(50);  // brief gap between channels
+        delay(50);
     }
     Serial.println("Walk complete.");
     Serial.println();
@@ -253,9 +263,10 @@ static void testActuateAllOnOff() {
     if (dur <= 0) dur = DEFAULT_PULSE_MS;
 
     Serial.printf("All ON for %d ms...", dur);
-    ioexp.setAll(0xFFFF);
+    for (uint8_t i = 0; i < NUM_ACTUATORS; i++)
+        digitalWrite(DC_PINS[i], HIGH);
     delay(dur);
-    ioexp.allOff();
+    dcAllOff();
     Serial.println(" All OFF.");
     Serial.println();
 }
@@ -305,14 +316,19 @@ void setup() {
     initMuxPins(MUX_B_PINS);
     initMuxPins(MUX_C_PINS);
 
+    // DC solenoid outputs
+    for (uint8_t i = 0; i < NUM_ACTUATORS; i++) {
+        pinMode(DC_PINS[i], OUTPUT);
+        digitalWrite(DC_PINS[i], LOW);
+    }
+
     bool adc1_ok = adc1.begin();
     bool adc2_ok = adc2.begin();
-    ioexp.begin();
 
     Serial.println("\nPandaV2 DC Channel Test");
     Serial.printf("ADC1:  %s\n", adc1_ok ? "OK" : "FAIL");
     Serial.printf("ADC2:  %s\n", adc2_ok ? "OK" : "FAIL");
-    Serial.println("IOEXP: OK");
+    Serial.printf("DC Pins: %u outputs configured\n", NUM_ACTUATORS);
 
     printMenu();
 }

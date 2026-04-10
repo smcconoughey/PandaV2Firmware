@@ -15,14 +15,12 @@
 #define PIN_SPI0_SCK    13
 
 // ---------------------------------------------------------------------------
-// SPI bus 1 — ADC2 (MCP3561RT, U38) + I/O expander (MCP23S17, U35)
+// SPI bus 1 — ADC2 (MCP3561RT, U38)
 // Hardware SPI1 (LPSPI3): MOSI=26, MISO=39, SCK=27
-// CS and MISO/MOSI/SCK read from Microcontroller schematic image.
 // ---------------------------------------------------------------------------
 #define PIN_SPI1_MOSI   26
 #define PIN_SPI1_SCK    27
 #define PIN_SPI1_MISO   39
-#define PIN_IOEXP_CS    37  // MCP23S17 U35
 #define PIN_ADC2_CS     38  // MCP3561RT U38
 #define PIN_ADC2_IRQ    14  // active-low, open-drain; attach interrupt INPUT_PULLUP
 
@@ -83,22 +81,6 @@
 #define PIN_MUX_C_S1    36
 #define PIN_MUX_C_S2    33
 #define PIN_MUX_C_S3    34
-
-// ---------------------------------------------------------------------------
-// MCP23S17 I/O expander (U35) — ACTUATE[1..16]
-// SPI1 bus, CS = PIN_IOEXP_CS (pin 37).
-// Hardware address: A0=A1=A2=GND → device addr 0.
-// PORTB[7:0] → ACTUATE1..8  (GPB7=ACTUATE1, GPB0=ACTUATE8)
-// PORTA[7:0] → ACTUATE9..16 (GPA7=ACTUATE9, GPA0=ACTUATE16)
-// Always write OLAT, not GPIO register, to avoid read-modify-write race.
-// In any armed state: validate desired output before issuing the SPI write.
-// ---------------------------------------------------------------------------
-#define IOEXP_SPI_ADDR_WRITE  0x40  // A2=A1=A0=0
-#define IOEXP_SPI_ADDR_READ   0x41
-
-// Bit mask for ACTUATE channel n (1-indexed) within its port register
-#define ACTUATE_PORT_B_MASK(n)  (1u << (8  - (n)))   // n = 1..8  → PORTB
-#define ACTUATE_PORT_A_MASK(n)  (1u << (16 - (n)))   // n = 9..16 → PORTA
 
 // ---------------------------------------------------------------------------
 // Arming — TODO: confirm pin assignments on V2 board.
