@@ -35,3 +35,19 @@ static constexpr char ID_POWER             = 'v';
 static constexpr float TC_CONSTANT         = 2217.294f;
 static constexpr float S_CONSTANT          = 0.5f;
 static constexpr uint8_t DATA_DECIMALS     = 5;
+
+// Bang-bang controller — hardwired channels, do not change without hardware rework
+// ptData[] indices (0-indexed into the converted PT array from mux A)
+static constexpr uint8_t BB_LOX_PT_CH      = 0;   // LOX pressure sensor
+static constexpr uint8_t BB_FUEL_PT_CH     = 1;   // Fuel pressure sensor
+// DC solenoid channels (1-indexed, maps to DC_PINS[ch-1])
+static constexpr uint8_t BB_LOX_DC_CH      = 4;   // LOX vent solenoid
+static constexpr uint8_t BB_FUEL_DC_CH     = 7;   // Fuel vent solenoid
+
+// Pressure sanity bounds — disable BB if reading is outside these (ADC fault or open sensor)
+static constexpr float BB_PRESSURE_MIN_PSI = -50.0f;
+static constexpr float BB_PRESSURE_MAX_PSI = 4000.0f;
+
+// EEPROM layout for BB config persistence
+static constexpr uint16_t BB_EEPROM_MAGIC  = 0xBB42;
+static constexpr int      BB_EEPROM_ADDR   = 0;    // base address (27 bytes used)

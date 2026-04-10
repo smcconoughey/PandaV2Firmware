@@ -13,6 +13,7 @@
 #include "CommsHandler.h"
 #include "SequenceHandler.h"
 #include "ArmingController.h"
+#include "BangBang.h"
 
 // ── Hardware instances ──────────────────────────────────────────────
 
@@ -66,6 +67,20 @@ MuxBank adc2Banks[] = {
 Scanner scanner1(adc1, adc1Banks, 2);
 Scanner scanner2(adc2, adc2Banks, 1);
 
+// ── Bang-bang controllers ───────────────────────────────────────────
+// Hardwired: LOX reads ptData[BB_LOX_PT_CH], drives DC BB_LOX_DC_CH.
+//            Fuel reads ptData[BB_FUEL_PT_CH], drives DC BB_FUEL_DC_CH.
+// Config is loaded from EEPROM on boot; both start DISABLED.
+// Do not command BB solenoid channels via 'S' while BB is enabled.
+
+BBController bbLox (&ptData[BB_LOX_PT_CH],  BB_LOX_DC_CH,  'L');
+BBController bbFuel(&ptData[BB_FUEL_PT_CH], BB_FUEL_DC_CH, 'F');
+
+// Thin wrapper so BBController can drive solenoids without a SequenceHandler dep
+static bool bbSetChannel(uint8_t ch, bool state) {
+    return seq.setChannel(ch, state);
+}
+
 // ── Command handling ────────────────────────────────────────────────
 
 static void handleCommand(char* packet) {
@@ -87,9 +102,11 @@ static void handleCommand(char* packet) {
     }
 
     case 'r': {
-        // Disarm: always safe to execute. Cancel any running sequence first.
+        // Disarm: always safe. Cancel sequence, kill all outputs, disable BB.
         seq.cancelExecution();
         seq.setAllOff();
+        bbLox.disableNow(bbSetChannel);
+        bbFuel.disableNow(bbSetChannel);
         auto result = arming.disarm();
         comms.sendLine("DISARM_ACK");
         if (seq.hasSequence()) {
@@ -170,6 +187,70 @@ static void handleCommand(char* packet) {
         break;
     }
 
+    case 'B': {
+        // Configure bang-bang: "BL<setpoint>,<deadband>,<wait_ms>"
+        //                      "BF<setpoint>,<deadband>,<wait_ms>"
+        if (strlen(packet) < 4) {
+            comms.sendLine("BB_ERROR:short");
+            break;
+        }
+        char side = packet[1];
+        if (side != 'L' && side != 'F') {
+            comms.sendLine("BB_ERROR:bad_bus");
+            break;
+        }
+
+        float sp, db;
+        unsigned long wt;
+        if (sscanf(packet + 2, "%f,%f,%lu", &sp, &db, &wt) != 3
+                || sp < 0.0f || db <= 0.0f || wt > 60000UL) {
+            comms.sendLine("BB_ERROR:parse");
+            break;
+        }
+
+        BBController& ctrl = (side == 'L') ? bbLox : bbFuel;
+        ctrl.configure(sp, db, (uint32_t)wt);
+        bbSaveEeprom(bbLox, bbFuel);
+
+        char ack[64];
+        snprintf(ack, sizeof(ack), "BB_CFG:%c:%.1f:%.1f:%lu", side, sp, db, wt);
+        comms.sendLine(ack);
+        break;
+    }
+
+    case 'b': {
+        // Enable/disable bang-bang: "bL1", "bL0", "bF1", "bF0"
+        if (strlen(packet) < 3) {
+            comms.sendLine("BB_ERROR:short");
+            break;
+        }
+        char side  = packet[1];
+        char stCh  = packet[2];
+        if ((side != 'L' && side != 'F') || (stCh != '0' && stCh != '1')) {
+            comms.sendLine("BB_ERROR:bad_arg");
+            break;
+        }
+
+        BBController& ctrl = (side == 'L') ? bbLox : bbFuel;
+
+        if (stCh == '1') {
+            if (!arming.isArmed()) {
+                comms.sendLine("BB_ERROR:not_armed");
+                break;
+            }
+            ctrl.enable();
+            char ack[32];
+            snprintf(ack, sizeof(ack), "BB:%c:ON", side);
+            comms.sendLine(ack);
+        } else {
+            ctrl.disableNow(bbSetChannel);
+            char ack[32];
+            snprintf(ack, sizeof(ack), "BB:%c:OFF", side);
+            comms.sendLine(ack);
+        }
+        break;
+    }
+
     default:
         comms.sendLine("CMD_ERROR:unknown");
         break;
@@ -182,26 +263,21 @@ static elapsedMillis boardTempTimer;
 static constexpr uint32_t BOARD_TEMP_INTERVAL_MS = 2000;
 
 static void updateConversions() {
-    // Update board temp periodically (blocking read, ~1ms)
     if (boardTempTimer >= BOARD_TEMP_INTERVAL_MS) {
         boardTempTimer = 0;
         float t = scanner2.readBoardTemp();
         if (t > -900.0f) boardTemp = t;
     }
 
-    // PTs: mux A raw voltage → engineering units
     for (uint8_t i = 0; i < NUM_PT_CH; i++)
         ptData[i] = convertPT(muxA_data[i], i);
 
-    // Current sense: mux B raw voltage → amps
     for (uint8_t i = 0; i < NUM_MUX_B_CH; i++)
         curData[i] = convertCurrent(muxB_data[i]);
 
-    // Load cells: mux C channels 0..7
     for (uint8_t i = 0; i < NUM_LC_CH; i++)
         lcData[i] = convertLC(muxC_data[MUX_C_LC_START + i], i);
 
-    // Thermocouples: mux C channels 8..15
     for (uint8_t i = 0; i < NUM_TC_CH; i++)
         tcData[i] = convertTC(muxC_data[MUX_C_TC_START + i], i, boardTemp);
 }
@@ -217,20 +293,30 @@ static void sendTelemetry() {
 
     char buf[512];
 
-    // PTs (converted)
     CommsHandler::toCSVRow(ptData, 'p', NUM_PT_CH, buf, sizeof(buf));
     comms.send(buf);
 
-    // Solenoid current (converted)
     CommsHandler::toCSVRow(curData, ID_SOLENOID_CURRENT, NUM_MUX_B_CH, buf, sizeof(buf));
     comms.send(buf);
 
-    // LCs + TCs combined (matches V1's 't' packet format)
     float lctcCombined[NUM_LC_CH + NUM_TC_CH];
     memcpy(lctcCombined, lcData, sizeof(float) * NUM_LC_CH);
     memcpy(lctcCombined + NUM_LC_CH, tcData, sizeof(float) * NUM_TC_CH);
     CommsHandler::toCSVRow(lctcCombined, ID_LCTC, NUM_LC_CH + NUM_TC_CH, buf, sizeof(buf));
     comms.send(buf);
+
+    // BB status: "BB:<bus>:<enabled>:<valve_open>:<pressure_psi>"
+    snprintf(buf, sizeof(buf), "BB:L:%d:%d:%.1f",
+        bbLox.isEnabled()   ? 1 : 0,
+        bbLox.isValveOpen() ? 1 : 0,
+        bbLox.lastPressure());
+    comms.sendLine(buf);
+
+    snprintf(buf, sizeof(buf), "BB:F:%d:%d:%.1f",
+        bbFuel.isEnabled()   ? 1 : 0,
+        bbFuel.isValveOpen() ? 1 : 0,
+        bbFuel.lastPressure());
+    comms.sendLine(buf);
 }
 
 // ── Power monitoring telemetry ──────────────────────────────────────
@@ -274,36 +360,29 @@ static void checkSequenceComplete() {
 void setup() {
     Serial.begin(DEBUG_BAUD);
 
-    // SPI buses
     SPI.begin();
     SPI1.begin();
-
-    // I2C
     Wire.begin();
 
-    // RS-485
     comms.begin(RS485_BAUD);
 
-    // ADCs
     bool adc1_ok = adc1.begin();
     bool adc2_ok = adc2.begin();
 
-    // DC solenoid outputs — configure pins and ensure all off
     seq.begin();
 
-    // Scanners
     scanner1.begin();
     scanner2.begin();
 
-    // Power monitors
     bool pm0_ok = pmon0.begin(0.1f, 5.0f);
     bool pm1_ok = pmon1.begin(0.1f, 5.0f);
     bool pm2_ok = pmon2.begin(0.1f, 5.0f);
 
-    // Arming — starts disarmed with a disarm pulse
     arming.begin();
 
-    // Startup report
+    // Load BB config from EEPROM (both controllers start disabled regardless)
+    bbLoadEeprom(bbLox, bbFuel);
+
     comms.sendLine("PANDA_V2_INIT");
 
     if (!adc1_ok) comms.sendLine("WARN:ADC1_INIT_FAIL");
@@ -334,10 +413,14 @@ void loop() {
     // 4. Sensor conversions (raw voltage → engineering units)
     updateConversions();
 
-    // 5. Telemetry
+    // 5. Bang-bang control loops (run after conversions so ptData is current)
+    bbLox.update(arming.isArmed(), bbSetChannel);
+    bbFuel.update(arming.isArmed(), bbSetChannel);
+
+    // 6. Telemetry
     sendTelemetry();
     sendPowerTelemetry();
 
-    // 6. Sequence completion detection
+    // 7. Sequence completion detection
     checkSequenceComplete();
 }
