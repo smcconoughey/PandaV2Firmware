@@ -8,7 +8,7 @@ static const SPISettings SPI_ADC_SETTINGS(20000000, MSBFIRST, SPI_MODE0);
 static constexpr uint32_t T_MUX_SETTLE_US = 500;
 
 // Serial
-static constexpr uint32_t RS485_BAUD = 115200;
+static constexpr uint32_t RS485_BAUD = 460800;
 static constexpr uint32_t DEBUG_BAUD = 115200;
 static constexpr size_t RS485_RX_BUF = 512;
 static constexpr size_t RS485_TX_BUF = 2048;
