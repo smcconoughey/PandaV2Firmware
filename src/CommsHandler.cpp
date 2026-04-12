@@ -60,7 +60,8 @@ void CommsHandler::send(const char* msg) {
     if (!msg) return;
     deAssert();
     _port.print(msg);
-    _port.flush(); // wait for TX complete before releasing DE
+    // flush only needed when DE is GPIO-controlled (to hold DE until last bit)
+    if (_dePin != 0xFF) _port.flush();
     deRelease();
 }
 
@@ -68,7 +69,7 @@ void CommsHandler::sendLine(const char* msg) {
     if (!msg) return;
     deAssert();
     _port.println(msg);
-    _port.flush();
+    if (_dePin != 0xFF) _port.flush();
     deRelease();
 }
 

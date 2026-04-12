@@ -24,6 +24,8 @@ INA230 pmon0(Wire, INA230_ADDR_U8);
 INA230 pmon1(Wire, INA230_ADDR_U10);
 INA230 pmon2(Wire, INA230_ADDR_U12);
 
+static bool pmonOk[3] = {false, false, false};
+
 // RS-485 comms — Serial7 = bus 1 (pins 28/29), Serial6 = bus 2 (pins 25/24)
 CommsHandler comms(Serial7, PIN_RS485_1_DE);
 CommsHandler comms2(Serial6, PIN_RS485_2_DE);
@@ -53,7 +55,7 @@ MuxBank adc1Banks[] = {
      NUM_MUX_B_CH,
      MCP3561RT::Mux::CH1,
      muxB_data,
-     3.3f},
+     1.25f},
 };
 
 MuxBank adc2Banks[] = {
@@ -314,8 +316,11 @@ static constexpr uint32_t POWER_INTERVAL_MS = 500;
 
 static void sendPowerTelemetry(CommsHandler &out) {
   char buf[128];
-  float voltages[3] = {pmon0.busVoltage_V(), pmon1.busVoltage_V(),
-                       pmon2.busVoltage_V()};
+  INA230* pmons[3] = {&pmon0, &pmon1, &pmon2};
+  float voltages[3] = {0};
+  for (int i = 0; i < 3; i++) {
+    if (pmonOk[i]) voltages[i] = pmons[i]->busVoltage_V();
+  }
   CommsHandler::toCSVRow(voltages, ID_POWER, 3, buf, sizeof(buf));
   out.send(buf);
 }
@@ -342,22 +347,37 @@ static void checkSequenceComplete(CommsHandler &out) {
 void setup() {
   Serial.begin(DEBUG_BAUD);
 
+  if (CrashReport) {
+    Serial.print(CrashReport);
+    // Give time for USB serial to flush before continuing
+    delay(2000);
+  }
+
   SPI.begin();
   SPI1.begin();
   Wire.begin();
+  Wire.setTimeout(2500); // 2.5ms max per I2C transaction (default is infinite)
 
   // Bring up both RS-485 buses immediately — any TX problem shows up on BOOT
   comms.begin(RS485_BAUD);
   comms2.begin(RS485_BAUD);
 
-  // V2 PCB has Y/Z (TX diff pair) swapped on the RJ45 (Bus 1 / Serial7).
-  // Invert UART TX signal at the peripheral to compensate.
-  // this fucking sucked to find and we should try to fix this in hardware
-  // later.
+  // V2 PCB has TX differential pair (Y/Z) swapped on the RJ45.
+  // RX pair (A/B) is correct — do NOT set RXINV.
+  // TODO: fix Y/Z routing in next board revision
+  //
+  // Bus 1 (Serial7 → LPUART7)
   LPUART7_CTRL |= LPUART_CTRL_TXINV;
+  // Bus 2 (Serial6 → LPUART1)
+  LPUART1_CTRL |= LPUART_CTRL_TXINV;
 
   comms.sendLine("BOOT");
   comms2.sendLine("BOOT");
+
+  if (CrashReport) {
+    comms.sendLine("WARN:CRASH_DETECTED");
+    comms2.sendLine("WARN:CRASH_DETECTED");
+  }
 
   bool adc1_ok = adc1.begin();
   bool adc2_ok = adc2.begin();
@@ -367,9 +387,9 @@ void setup() {
   scanner1.begin();
   scanner2.begin();
 
-  bool pm0_ok = pmon0.begin(0.1f, 5.0f);
-  bool pm1_ok = pmon1.begin(0.1f, 5.0f);
-  bool pm2_ok = pmon2.begin(0.1f, 5.0f);
+  pmonOk[0] = pmon0.begin(0.1f, 5.0f);
+  pmonOk[1] = pmon1.begin(0.1f, 5.0f);
+  pmonOk[2] = pmon2.begin(0.1f, 5.0f);
 
   arming.begin();
 
@@ -386,15 +406,15 @@ void setup() {
     comms.sendLine("WARN:ADC2_INIT_FAIL");
     comms2.sendLine("WARN:ADC2_INIT_FAIL");
   }
-  if (!pm0_ok) {
+  if (!pmonOk[0]) {
     comms.sendLine("WARN:PMON0_INIT_FAIL");
     comms2.sendLine("WARN:PMON0_INIT_FAIL");
   }
-  if (!pm1_ok) {
+  if (!pmonOk[1]) {
     comms.sendLine("WARN:PMON1_INIT_FAIL");
     comms2.sendLine("WARN:PMON1_INIT_FAIL");
   }
-  if (!pm2_ok) {
+  if (!pmonOk[2]) {
     comms.sendLine("WARN:PMON2_INIT_FAIL");
     comms2.sendLine("WARN:PMON2_INIT_FAIL");
   }
@@ -403,17 +423,16 @@ void setup() {
 }
 
 void loop() {
-  // 1. Poll both buses; commands reply on the bus they arrived from
-  comms.poll();
-  if (comms.isPacketReady()) {
-    char *pkt = comms.takePacket();
-    handleCommand(pkt, comms);
+  // 1. Drain all queued commands
+  for (int i = 0; i < NUM_MAX_COMMANDS; i++) {
+    comms.poll();
+    if (!comms.isPacketReady()) break;
+    handleCommand(comms.takePacket(), comms);
   }
-
-  comms2.poll();
-  if (comms2.isPacketReady()) {
-    char *pkt = comms2.takePacket();
-    handleCommand(pkt, comms2);
+  for (int i = 0; i < NUM_MAX_COMMANDS; i++) {
+    comms2.poll();
+    if (!comms2.isPacketReady()) break;
+    handleCommand(comms2.takePacket(), comms2);
   }
 
   // 2. State machines
@@ -427,11 +446,11 @@ void loop() {
   // 4. Sensor conversions
   updateConversions();
 
-  // 5. Bang-bang control loops
+  // 5. Bang-bang
   bbLox.update(arming.isArmed(), bbSetChannel);
   bbFuel.update(arming.isArmed(), bbSetChannel);
 
-  // 6. Telemetry — broadcast on both buses
+  // 6. Telemetry
   if (telemetryTimer >= TELEMETRY_INTERVAL_MS) {
     telemetryTimer = 0;
     sendTelemetry(comms);
@@ -447,4 +466,8 @@ void loop() {
   // 7. Sequence completion
   checkSequenceComplete(comms);
   checkSequenceComplete(comms2);
+
+  // Rate cap: ~10kHz is plenty for 50ms telemetry + 500µs ADC settle.
+  // Avoids hammering ISRs and power rail at 600kHz.
+  delayMicroseconds(100);
 }
