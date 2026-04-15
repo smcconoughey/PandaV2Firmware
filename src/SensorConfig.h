@@ -1,5 +1,6 @@
 #pragma once
 #include <Arduino.h>
+#include "BoardConfig.h"
 
 // Sensor channel mapping and conversion for PandaV2.
 //
@@ -38,8 +39,10 @@ static constexpr uint8_t NUM_LC_CH = MUX_C_LC_COUNT;
 static constexpr uint8_t NUM_TC_CH = MUX_C_TC_COUNT;
 
 // ── PT calibration ─────────────────────────────────────────────────
-// Default: report raw voltage. Replace with per-channel cal from
-// transducer datasheets once known (e.g. 0-5000 PSI over 0-1.0V).
+// Converts INA132 output voltage → loop current in milliamps.
+// mA = (V_adc / PT_SHUNT_EFF_OHMS) * 1000
+// All 4-20 mA sensors: 4 mA = 0 PSI, 20 mA = full-scale PSI.
+// Per-channel PSI scaling is applied on the GC side using sensor_config.xlsx.
 
 static constexpr SensorCal PT_DEFAULT = {SensorType::PRESSURE, 1.0f, 0.0f};
 
@@ -70,8 +73,9 @@ static constexpr float CURRENT_SENSE_SCALE = 1.0f / 20.0f;  // A per V
 // ── Conversion functions ───────────────────────────────────────────
 
 inline float convertPT(float voltage, uint8_t ch) {
-    (void)ch; // per-channel cal not yet implemented
-    return (voltage - PT_DEFAULT.offset) * PT_DEFAULT.scale;
+    (void)ch;
+    // Return loop current in milliamps: mA = (V / R_shunt) * 1000
+    return (voltage / PT_SHUNT_EFF_OHMS) * 1000.0f;
 }
 
 inline float convertLC(float voltage, uint8_t ch) {

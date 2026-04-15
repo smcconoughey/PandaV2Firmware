@@ -37,6 +37,12 @@ static constexpr float TC_CONSTANT = 2217.294f;
 static constexpr float S_CONSTANT = 0.5f;
 static constexpr uint8_t DATA_DECIMALS = 5;
 
+// PT current-sense shunt effective resistance (Ω).
+// INA132 at unity gain with shunt in the 4-20 mA loop.
+// Empirically derived: V_adc ≈ 0.023 V at 4 mA idle → R = 0.023/0.004 = 5.75 Ω.
+// Verify against schematic; standard value is likely 5.6 Ω (E24).
+static constexpr float PT_SHUNT_EFF_OHMS = 5.75f;
+
 // Bang-bang controller — hardwired channels, do not change without hardware
 // rework ptData[] indices (0-indexed into the converted PT array from mux A)
 static constexpr uint8_t BB_LOX_PT_CH = 0;  // LOX pressure sensor
